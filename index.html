@@ -225,7 +225,7 @@
   // Supabaseダッシュボード > Project Settings > API から取得して置き換える
   const SUPABASE_URL = 'https://alrieisjlvvmlsocnjxw.supabase.co';
   const SUPABASE_ANON_KEY = 'sb_publishable_YfXmxy7iZ_6B8mMRU2H39w_ky7HuS3N';
-  const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
   // ── 開発中の簡易ログイン(ログイン画面ができるまでの仮運用) ──
   // Supabaseダッシュボード > Authentication > Users で自分用の
@@ -237,9 +237,9 @@
 
   async function devSignIn() {
     if (!DEV_TEST_EMAIL || !DEV_TEST_PASSWORD) return;
-    const { data: { session } } = await supabase.auth.getSession();
+    const { data: { session } } = await supabaseClient.auth.getSession();
     if (session) return; // 既にログイン済みならスキップ(2回目以降はセッションが残る)
-    const { error } = await supabase.auth.signInWithPassword({
+    const { error } = await supabaseClient.auth.signInWithPassword({
       email: DEV_TEST_EMAIL,
       password: DEV_TEST_PASSWORD,
     });
@@ -262,7 +262,7 @@
     if (user) {
       el.innerHTML = `<p class="auth-status">${user.email} でログイン中 <button class="auth-link-btn" id="logout-btn">ログアウト</button></p>`;
       document.getElementById('logout-btn').addEventListener('click', async () => {
-        await supabase.auth.signOut();
+        await supabaseClient.auth.signOut();
       });
     } else {
       el.innerHTML = `
@@ -278,7 +278,7 @@
       document.getElementById('send-link-btn').addEventListener('click', async () => {
         const email = document.getElementById('login-email').value.trim();
         if (!email) return;
-        const { error } = await supabase.auth.signInWithOtp({ email });
+        const { error } = await supabaseClient.auth.signInWithOtp({ email });
         el.innerHTML = error
           ? `<p class="auth-status">送信に失敗しました: ${error.message}</p>`
           : `<p class="auth-status">${email} 宛にログイン用リンクを送信しました。メールをご確認ください。</p>`;
@@ -287,7 +287,7 @@
   }
 
   // ログイン・ログアウトのたびに、表示中のテーマと一覧の進捗を読み込み直す
-  supabase.auth.onAuthStateChange((_event, session) => {
+  supabaseClient.auth.onAuthStateChange((_event, session) => {
     renderAuthArea(session?.user || null);
     if (currentThemeId) loadTheme(currentThemeId);
     loadUserProgress().then(() => {
@@ -307,9 +307,9 @@
 
   // ── 一覧画面: カテゴリ横断のテーマ一覧・絞り込み・画面遷移 ──
   async function buildThemeSequence() {
-    const { data: categories, error: catErr } = await supabase.from('categories').select('*').order('sort_order');
+    const { data: categories, error: catErr } = await supabaseClient.from('categories').select('*').order('sort_order');
     if (catErr) console.error('categories取得エラー:', catErr);
-    const { data: themes, error: themeErr } = await supabase.from('themes').select('*').order('sort_order');
+    const { data: themes, error: themeErr } = await supabaseClient.from('themes').select('*').order('sort_order');
     if (themeErr) console.error('themes取得エラー:', themeErr);
     categoryList = categories || [];
     themeSequence = [];
@@ -323,16 +323,16 @@
 
   // テーマ単位のブックマーク・直近解答履歴(最大5件)を取得して themeSequence に反映する
   async function loadUserProgress() {
-    const { data: { user } } = await supabase.auth.getUser();
+    const { data: { user } } = await supabaseClient.auth.getUser();
     if (!user || !themeSequence.length) return;
 
-    const { data: bookmarks } = await supabase
+    const { data: bookmarks } = await supabaseClient
       .from('user_bookmarks')
       .select('theme_id')
       .eq('user_id', user.id);
     const bookmarkedThemeIds = new Set((bookmarks || []).map(b => b.theme_id));
 
-    const { data: logs } = await supabase
+    const { data: logs } = await supabaseClient
       .from('user_answer_logs')
       .select('theme_id, is_correct, answered_at')
       .eq('user_id', user.id)
@@ -458,14 +458,14 @@
 
   // ログイン済みユーザーのみブックマークをSupabaseに永続化する
   async function toggleThemeBookmark(theme) {
-    const { data: { user } } = await supabase.auth.getUser();
+    const { data: { user } } = await supabaseClient.auth.getUser();
     if (!user) return; // 未ログイン時は何もしない(今後ログイン導線を追加)
 
     theme.isBookmarked = !theme.isBookmarked;
     if (theme.isBookmarked) {
-      await supabase.from('user_bookmarks').insert({ user_id: user.id, theme_id: theme.id });
+      await supabaseClient.from('user_bookmarks').insert({ user_id: user.id, theme_id: theme.id });
     } else {
-      await supabase.from('user_bookmarks').delete().eq('user_id', user.id).eq('theme_id', theme.id);
+      await supabaseClient.from('user_bookmarks').delete().eq('user_id', user.id).eq('theme_id', theme.id);
     }
     applyListFilter();
   }
@@ -520,7 +520,7 @@
   // ── 2. テーマ(設問)の読み込み ─────────────────────────
   async function loadTheme(themeId) {
     currentThemeId = themeId;
-    const { data: theme, error: themeErr } = await supabase
+    const { data: theme, error: themeErr } = await supabaseClient
       .from('themes')
       .select('*, categories(is_free)')
       .eq('id', themeId)
@@ -528,10 +528,10 @@
     if (themeErr) return console.error(themeErr);
 
     // ログイン済みなら課金状態(entitlements)も確認する
-    const { data: { user } } = await supabase.auth.getUser();
+    const { data: { user } } = await supabaseClient.auth.getUser();
     let isPremium = false;
     if (user) {
-      const { data: ent } = await supabase
+      const { data: ent } = await supabaseClient
         .from('entitlements')
         .select('is_premium')
         .eq('user_id', user.id)
@@ -552,13 +552,13 @@
     }
     hideLockScreen();
 
-    const { data: buckets } = await supabase
+    const { data: buckets } = await supabaseClient
       .from('buckets')
       .select('*')
       .eq('theme_id', themeId)
       .order('sort_order');
 
-    const { data: questions } = await supabase
+    const { data: questions } = await supabaseClient
       .from('questions')
       .select('*')
       .eq('theme_id', themeId);
@@ -660,9 +660,9 @@
     }
 
     // ログイン済みユーザーのみ解答ログを保存(RLSにより本人分しか書けない)
-    const { data: { user } } = await supabase.auth.getUser();
+    const { data: { user } } = await supabaseClient.auth.getUser();
     if (user) {
-      await supabase.from('user_answer_logs').insert({
+      await supabaseClient.from('user_answer_logs').insert({
         user_id: user.id,
         theme_id: currentThemeId,
         question_id: questionId,
@@ -697,14 +697,14 @@
     const msgEl = document.getElementById('redeem-message');
     if (!code) return;
 
-    const { data: { user } } = await supabase.auth.getUser();
+    const { data: { user } } = await supabaseClient.auth.getUser();
     if (!user) {
       msgEl.hidden = false;
       msgEl.textContent = '先にログインしてください。';
       return;
     }
 
-    const { data, error } = await supabase.functions.invoke('redeem-code', { body: { code } });
+    const { data, error } = await supabaseClient.functions.invoke('redeem-code', { body: { code } });
     msgEl.hidden = false;
     if (error || data?.error) {
       msgEl.textContent = 'コードが正しくないか、エラーが発生しました。';
