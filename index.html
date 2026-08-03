@@ -52,10 +52,22 @@
   .theme-link-star { cursor: pointer; color: #c9ccd1; font-size: 16px; line-height: 1; }
   .theme-link-star.active { color: #f2a93b; }
   .theme-link-right { display: flex; align-items: center; gap: 10px; }
-  .theme-link-history { font-size: 12px; color: var(--muted); letter-spacing: 1px; }
+  .theme-link-accuracy { font-size: 12px; color: var(--muted); white-space: nowrap; }
   .theme-link-arrow { color: var(--muted); }
   .list-empty { color: var(--muted); font-size: 14px; text-align: center; padding: 24px 0; }
-  .list-filters { display: flex; gap: 10px; margin-bottom: 20px; }
+  .list-filters { display: flex; gap: 10px; margin-bottom: 12px; }
+  .sort-toggle-btn {
+    background: none;
+    border: none;
+    color: var(--primary);
+    font-size: 12px;
+    text-decoration: underline;
+    cursor: pointer;
+    padding: 0;
+    margin-bottom: 16px;
+    display: block;
+  }
+  .sort-toggle-btn.active { color: var(--primary-light); font-weight: 600; }
   .practice-top-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
   .back-link {
     background: none;
@@ -184,13 +196,12 @@
   <div id="list-view">
     <div class="filter-selectors">
       <select id="filter-category-select"></select>
-      <select id="filter-theme-select"></select>
     </div>
     <div class="list-filters">
       <button class="filter-btn active" data-filter="all">すべて</button>
       <button class="filter-btn" data-filter="bookmark">★ ブックマーク</button>
-      <button class="filter-btn" data-filter="miss">✕ 前回ミス</button>
     </div>
+    <button class="sort-toggle-btn" id="sort-toggle-btn">正答率が低い順に並べ替え</button>
     <div id="theme-list"></div>
   </div>
 
@@ -301,58 +312,63 @@
   let selectedCardEl = null;
   let sortedIds = new Set();
   let currentThemeId = null;
-  let currentListFilter = 'all'; // 'all' | 'bookmark' | 'miss'
+  let currentListFilter = 'all'; // 'all' | 'bookmark'
+  let sortByAccuracy = false; // 正答率が低い順に並べ替えるかどうか
   let themeSequence = []; // 全カテゴリを横断した「カテゴリ順→テーマ順」の一覧(ブックマーク・履歴を含む)
   let categoryList = []; // カテゴリのプルダウン用一覧
 
   // ── 一覧画面: カテゴリ横断のテーマ一覧・絞り込み・画面遷移 ──
   async function buildThemeSequence() {
-    const { data: categories, error: catErr } = await supabaseClient.from('categories').select('*').order('sort_order');
+    const [
+      { data: categories, error: catErr },
+      { data: themes, error: themeErr }
+    ] = await Promise.all([
+      supabaseClient.from('categories').select('*').order('sort_order'),
+      supabaseClient.from('themes').select('*').order('sort_order')
+    ]);
     if (catErr) console.error('categories取得エラー:', catErr);
-    const { data: themes, error: themeErr } = await supabaseClient.from('themes').select('*').order('sort_order');
     if (themeErr) console.error('themes取得エラー:', themeErr);
     categoryList = categories || [];
     themeSequence = [];
     categoryList.forEach(c => {
       (themes || [])
         .filter(t => t.category_id === c.id)
-        .forEach(t => themeSequence.push({ ...t, categoryName: c.name, isBookmarked: false, history: [] }));
+        .forEach(t => themeSequence.push({ ...t, categoryName: c.name, isBookmarked: false, accuracy: null, attemptCount: 0 }));
     });
     await loadUserProgress();
   }
 
-  // テーマ単位のブックマーク・直近解答履歴(最大5件)を取得して themeSequence に反映する
+  // テーマ単位のブックマーク・正答率を取得して themeSequence に反映する
   async function loadUserProgress() {
     const { data: { user } } = await supabaseClient.auth.getUser();
     if (!user || !themeSequence.length) return;
 
-    const { data: bookmarks } = await supabaseClient
-      .from('user_bookmarks')
-      .select('theme_id')
-      .eq('user_id', user.id);
+    const [{ data: bookmarks }, { data: logs }] = await Promise.all([
+      supabaseClient.from('user_bookmarks').select('theme_id').eq('user_id', user.id),
+      supabaseClient.from('user_answer_logs').select('theme_id, is_correct').eq('user_id', user.id)
+    ]);
     const bookmarkedThemeIds = new Set((bookmarks || []).map(b => b.theme_id));
 
-    const { data: logs } = await supabaseClient
-      .from('user_answer_logs')
-      .select('theme_id, is_correct, answered_at')
-      .eq('user_id', user.id)
-      .order('answered_at', { ascending: true });
-    const historyMap = {};
+    const totalCounts = {};
+    const correctCounts = {};
     (logs || []).forEach(log => {
-      if (!historyMap[log.theme_id]) historyMap[log.theme_id] = [];
-      historyMap[log.theme_id].push(log.is_correct);
+      totalCounts[log.theme_id] = (totalCounts[log.theme_id] || 0) + 1;
+      if (log.is_correct) correctCounts[log.theme_id] = (correctCounts[log.theme_id] || 0) + 1;
     });
 
     themeSequence.forEach(t => {
       t.isBookmarked = bookmarkedThemeIds.has(t.id);
-      t.history = (historyMap[t.id] || []).slice(-5);
+      const total = totalCounts[t.id] || 0;
+      const correct = correctCounts[t.id] || 0;
+      t.attemptCount = total;
+      t.accuracy = total > 0 ? correct / total : null; // 未挑戦はnull
     });
   }
 
   async function initListView() {
     await buildThemeSequence();
     populateFilterSelectors();
-    renderThemeList('', '');
+    renderThemeList('');
   }
 
   function populateFilterSelectors() {
@@ -364,36 +380,19 @@
       opt.textContent = c.name;
       catSel.appendChild(opt);
     });
-    populateThemeFilterOptions('');
-  }
-
-  function populateThemeFilterOptions(categoryId) {
-    const themeSel = document.getElementById('filter-theme-select');
-    themeSel.innerHTML = '<option value="">すべてのテーマ</option>';
-    themeSequence
-      .filter(t => !categoryId || t.category_id === categoryId)
-      .forEach(t => {
-        const opt = document.createElement('option');
-        opt.value = t.id;
-        opt.textContent = t.title;
-        themeSel.appendChild(opt);
-      });
   }
 
   function applyListFilter() {
     const categoryId = document.getElementById('filter-category-select').value;
-    const themeId = document.getElementById('filter-theme-select').value;
-    renderThemeList(categoryId, themeId);
+    renderThemeList(categoryId);
   }
 
-  function renderThemeList(categoryId, themeId) {
+  function renderThemeList(categoryId) {
     const el = document.getElementById('theme-list');
     el.innerHTML = '';
     const filtered = themeSequence.filter(t => {
       if (categoryId && t.category_id !== categoryId) return false;
-      if (themeId && t.id !== themeId) return false;
       if (currentListFilter === 'bookmark') return t.isBookmarked;
-      if (currentListFilter === 'miss') return t.history.length > 0 && t.history[t.history.length - 1] === false;
       return true;
     });
 
@@ -412,6 +411,18 @@
       group.themes.push(t);
     });
 
+    if (sortByAccuracy) {
+      // カテゴリの区切りは保ったまま、各カテゴリの中だけ正答率が低い順(未挑戦は末尾)に並べ替える
+      groups.forEach(g => {
+        g.themes.sort((a, b) => {
+          if (a.accuracy === null && b.accuracy === null) return 0;
+          if (a.accuracy === null) return 1;
+          if (b.accuracy === null) return -1;
+          return a.accuracy - b.accuracy;
+        });
+      });
+    }
+
     groups.forEach(g => {
       const section = document.createElement('div');
       section.className = 'category-group';
@@ -421,39 +432,42 @@
       heading.textContent = g.categoryName;
       section.appendChild(heading);
 
-      g.themes.forEach(t => {
-        const link = document.createElement('a');
-        link.className = 'theme-link';
-        link.href = '#';
-
-        const historyText = t.history.map(h => h ? '⭕' : '✕').join('');
-        link.innerHTML = `
-          <span class="theme-link-main">
-            <span class="theme-link-star ${t.isBookmarked ? 'active' : ''}">${t.isBookmarked ? '★' : '☆'}</span>
-            <span>${t.title}</span>
-          </span>
-          <span class="theme-link-right">
-            ${t.history.length ? `<span class="theme-link-history">${historyText}</span>` : ''}
-            <span class="theme-link-arrow">→</span>
-          </span>
-        `;
-
-        link.querySelector('.theme-link-star').addEventListener('click', e => {
-          e.preventDefault();
-          e.stopPropagation();
-          toggleThemeBookmark(t);
-        });
-
-        link.addEventListener('click', e => {
-          e.preventDefault();
-          openTheme(t.id);
-        });
-
-        section.appendChild(link);
-      });
+      g.themes.forEach(t => section.appendChild(buildThemeLink(t)));
 
       el.appendChild(section);
     });
+  }
+
+  function buildThemeLink(t) {
+    const link = document.createElement('a');
+    link.className = 'theme-link';
+    link.href = '#';
+
+    const accuracyText = t.accuracy === null ? '未挑戦' : `正答率 ${Math.round(t.accuracy * 100)}%`;
+
+    link.innerHTML = `
+      <span class="theme-link-main">
+        <span class="theme-link-star ${t.isBookmarked ? 'active' : ''}">${t.isBookmarked ? '★' : '☆'}</span>
+        <span>${t.title}</span>
+      </span>
+      <span class="theme-link-right">
+        <span class="theme-link-accuracy">${accuracyText}</span>
+        <span class="theme-link-arrow">→</span>
+      </span>
+    `;
+
+    link.querySelector('.theme-link-star').addEventListener('click', e => {
+      e.preventDefault();
+      e.stopPropagation();
+      toggleThemeBookmark(t);
+    });
+
+    link.addEventListener('click', e => {
+      e.preventDefault();
+      openTheme(t.id);
+    });
+
+    return link;
   }
 
   // ログイン済みユーザーのみブックマークをSupabaseに永続化する
@@ -495,6 +509,14 @@
         applyListFilter();
       });
     });
+
+    const sortBtn = document.getElementById('sort-toggle-btn');
+    sortBtn.addEventListener('click', () => {
+      sortByAccuracy = !sortByAccuracy;
+      sortBtn.classList.toggle('active', sortByAccuracy);
+      sortBtn.textContent = sortByAccuracy ? 'カテゴリ順に戻す' : '正答率が低い順に並べ替え';
+      applyListFilter();
+    });
   }
 
   function openTheme(themeId) {
@@ -520,15 +542,22 @@
   // ── 2. テーマ(設問)の読み込み ─────────────────────────
   async function loadTheme(themeId) {
     currentThemeId = themeId;
-    const { data: theme, error: themeErr } = await supabaseClient
-      .from('themes')
-      .select('*, categories(is_free)')
-      .eq('id', themeId)
-      .single();
+    // 通信を待つ間に前回の表示が一瞬残らないよう、真っ先にリセットする
+    document.getElementById('feedback').hidden = true;
+    document.getElementById('buckets').innerHTML = '';
+    document.getElementById('deck').innerHTML = '';
+
+    // お互いに依存しない2つの通信は並列で走らせる
+    const [
+      { data: theme, error: themeErr },
+      { data: { user } }
+    ] = await Promise.all([
+      supabaseClient.from('themes').select('*, categories(is_free)').eq('id', themeId).single(),
+      supabaseClient.auth.getUser()
+    ]);
     if (themeErr) return console.error(themeErr);
 
     // ログイン済みなら課金状態(entitlements)も確認する
-    const { data: { user } } = await supabaseClient.auth.getUser();
     let isPremium = false;
     if (user) {
       const { data: ent } = await supabaseClient
@@ -543,7 +572,6 @@
     const locked = !isFreeCategory && !isPremium;
 
     document.getElementById('theme-instruction').textContent = theme.instruction;
-    document.getElementById('feedback').hidden = true;
     updateBookmarkButton();
 
     if (locked) {
@@ -552,16 +580,10 @@
     }
     hideLockScreen();
 
-    const { data: buckets } = await supabaseClient
-      .from('buckets')
-      .select('*')
-      .eq('theme_id', themeId)
-      .order('sort_order');
-
-    const { data: questions } = await supabaseClient
-      .from('questions')
-      .select('*')
-      .eq('theme_id', themeId);
+    const [{ data: buckets }, { data: questions }] = await Promise.all([
+      supabaseClient.from('buckets').select('*').eq('theme_id', themeId).order('sort_order'),
+      supabaseClient.from('questions').select('*').eq('theme_id', themeId)
+    ]);
 
     currentQuestions = questions || [];
     selectedQuestionId = null;
@@ -685,11 +707,7 @@
 
   // ── 6. 初期表示 ─────────────────────────────────────
   document.getElementById('back-to-list-btn').addEventListener('click', showListView);
-  document.getElementById('filter-category-select').addEventListener('change', e => {
-    populateThemeFilterOptions(e.target.value);
-    applyListFilter();
-  });
-  document.getElementById('filter-theme-select').addEventListener('change', applyListFilter);
+  document.getElementById('filter-category-select').addEventListener('change', applyListFilter);
   document.getElementById('theme-bookmark-btn').addEventListener('click', toggleCurrentThemeBookmark);
   document.getElementById('next-theme-btn').addEventListener('click', goToNextTheme);
   document.getElementById('redeem-code-btn').addEventListener('click', async () => {
