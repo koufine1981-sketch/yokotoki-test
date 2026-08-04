@@ -556,19 +556,23 @@
     document.getElementById('theme-bookmark-btn').textContent = '☆ このテーマをブックマーク';
     document.getElementById('theme-bookmark-btn').classList.remove('active');
 
-    // お互いに依存しない2つの通信は並列で走らせる
+    // 必要な取得をできるだけまとめて並列で走らせる
     const [
       { data: theme, error: themeErr },
-      { data: { user } }
+      { data: { user } },
+      { data: buckets },
+      { data: questions }
     ] = await Promise.all([
       supabaseClient.from('themes').select('*, categories(is_free)').eq('id', themeId).single(),
-      supabaseClient.auth.getUser()
+      supabaseClient.auth.getUser(),
+      supabaseClient.from('buckets').select('*').eq('theme_id', themeId).order('sort_order'),
+      supabaseClient.from('questions').select('*').eq('theme_id', themeId)
     ]);
     // 待っている間に別のテーマへ切り替わっていたら、この結果は使わずに中断する
     if (themeId !== currentThemeId) return;
     if (themeErr) return console.error(themeErr);
 
-    // ログイン済みなら課金状態(entitlements)も確認する
+    // ログイン済みなら課金状態(entitlements)も確認する(user.idが分かってから)
     let isPremium = false;
     if (user) {
       const { data: ent } = await supabaseClient
@@ -583,6 +587,7 @@
     const isFreeCategory = theme.categories?.is_free || false;
     const locked = !isFreeCategory && !isPremium;
 
+    // ここまでで必要なデータが全部揃ったので、まとめて画面を更新する
     document.getElementById('theme-instruction').textContent = theme.instruction;
     updateBookmarkButton();
 
@@ -591,12 +596,6 @@
       return;
     }
     hideLockScreen();
-
-    const [{ data: buckets }, { data: questions }] = await Promise.all([
-      supabaseClient.from('buckets').select('*').eq('theme_id', themeId).order('sort_order'),
-      supabaseClient.from('questions').select('*').eq('theme_id', themeId)
-    ]);
-    if (themeId !== currentThemeId) return;
 
     currentQuestions = questions || [];
     selectedQuestionId = null;
