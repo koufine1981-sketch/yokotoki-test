@@ -552,6 +552,9 @@
     document.getElementById('feedback').hidden = true;
     document.getElementById('buckets').innerHTML = '';
     document.getElementById('deck').innerHTML = '';
+    document.getElementById('theme-instruction').textContent = '読み込み中...';
+    document.getElementById('theme-bookmark-btn').textContent = '☆ このテーマをブックマーク';
+    document.getElementById('theme-bookmark-btn').classList.remove('active');
 
     // お互いに依存しない2つの通信は並列で走らせる
     const [
