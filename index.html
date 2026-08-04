@@ -706,6 +706,8 @@
     el.hidden = false;
     el.textContent = explanation;
     el.className = 'feedback ' + (isCorrect ? 'correct' : 'incorrect');
+    // カードの枚数が多いとき、解説がデッキの下に隠れて見落とされないよう自動スクロール
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
   }
 
   // ── 6. 初期表示 ─────────────────────────────────────
