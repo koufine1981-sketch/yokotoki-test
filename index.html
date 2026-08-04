@@ -229,7 +229,7 @@
       <p id="redeem-message" class="redeem-message" hidden></p>
     </div>
     <div id="feedback" class="feedback" hidden></div>
-    <button class="next-theme-btn" id="next-theme-btn">次のテーマへ→</button>
+    <button class="next-theme-btn" id="next-theme-btn">次のテーマへ →</button>
   </div>
 </div>
 
@@ -528,9 +528,12 @@
     loadTheme(themeId);
   }
 
-  function showListView() {
+  async function showListView() {
     document.getElementById('practice-view').hidden = true;
     document.getElementById('list-view').hidden = false;
+    // 問題画面で解答した内容(正答率・ブックマーク)を一覧に反映し直す
+    await loadUserProgress();
+    applyListFilter();
   }
 
   // ── 全カテゴリ横断で「次のテーマへ」進む機能 ──────────
@@ -558,6 +561,8 @@
       supabaseClient.from('themes').select('*, categories(is_free)').eq('id', themeId).single(),
       supabaseClient.auth.getUser()
     ]);
+    // 待っている間に別のテーマへ切り替わっていたら、この結果は使わずに中断する
+    if (themeId !== currentThemeId) return;
     if (themeErr) return console.error(themeErr);
 
     // ログイン済みなら課金状態(entitlements)も確認する
@@ -570,6 +575,7 @@
         .single();
       isPremium = ent?.is_premium || false;
     }
+    if (themeId !== currentThemeId) return;
 
     const isFreeCategory = theme.categories?.is_free || false;
     const locked = !isFreeCategory && !isPremium;
@@ -587,6 +593,7 @@
       supabaseClient.from('buckets').select('*').eq('theme_id', themeId).order('sort_order'),
       supabaseClient.from('questions').select('*').eq('theme_id', themeId)
     ]);
+    if (themeId !== currentThemeId) return;
 
     currentQuestions = questions || [];
     selectedQuestionId = null;
