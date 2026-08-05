@@ -597,12 +597,21 @@
     }
     hideLockScreen();
 
-    currentQuestions = questions || [];
+    currentQuestions = shuffleArray(questions || []);
     selectedQuestionId = null;
     selectedCardEl = null;
     sortedIds = new Set();
     renderBuckets(buckets || []);
     renderDeck();
+  }
+
+  // Fisher-Yatesアルゴリズムで配列をシャッフルする(この配列自体を並べ替える)
+  function shuffleArray(array) {
+    for (let i = array.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [array[i], array[j]] = [array[j], array[i]];
+    }
+    return array;
   }
 
   // ロック画面と学習画面の出し分け
