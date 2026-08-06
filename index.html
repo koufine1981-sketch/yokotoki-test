@@ -246,8 +246,8 @@
   // テストアカウントを作成し、メール・パスワードを下に設定しておくと、
   // 画面を作らずに「ログイン済み」の状態でブックマーク・履歴・
   // 課金判定(entitlements)をそのままテストできる。
-  const DEV_TEST_EMAIL = 'koufine1981@gmail.com'; // 例: 'test@example.com'
-  const DEV_TEST_PASSWORD = 'Koutarou39'; // 例: 'テスト用パスワード'
+  const DEV_TEST_EMAIL = ''; // 例: 'test@example.com'
+  const DEV_TEST_PASSWORD = ''; // 例: 'テスト用パスワード'
 
   async function devSignIn() {
     if (!DEV_TEST_EMAIL || !DEV_TEST_PASSWORD) return;
@@ -702,7 +702,12 @@
       }
     }
 
-    // ログイン済みユーザーのみ解答ログを保存(RLSにより本人分しか書けない)
+    // 通信を待たず、画面の更新はここで即座に行う
+    selectedQuestionId = null;
+    selectedCardEl = null;
+    renderDeck();
+
+    // ログイン済みユーザーのみ解答ログを保存(画面表示とは切り離し、裏側で行う)
     const { data: { user } } = await supabaseClient.auth.getUser();
     if (user) {
       await supabaseClient.from('user_answer_logs').insert({
@@ -713,10 +718,6 @@
         is_correct: isCorrect
       });
     }
-
-    selectedQuestionId = null;
-    selectedCardEl = null;
-    renderDeck();
   }
 
   function showFeedback(isCorrect, explanation) {
